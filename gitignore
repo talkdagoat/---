@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Environment variables (never commit these)
+.env
+
+# Local data file (replaced by MongoDB on Railway)
+data.json
+
+# Replit-specific files
+attached_assets/
+replit.md
+.replit
+replit.nix
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
