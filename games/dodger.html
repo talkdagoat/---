@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dodger</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body {
+    width:100%; height:100%;
+    background:#0a0a1a;
+    font-family:'Segoe UI',sans-serif;
+    color:#fff;
+    overflow:hidden;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+}
+
+#game-wrap {
+    position:relative;
+    width: min(400px, min(100vw - 16px, calc((100vh - 80px) * 400/550)));
+    aspect-ratio: 400/550;
+    flex-shrink:0;
+}
+
+#ui {
+    position:absolute; top:0; left:0; right:0;
+    padding:10px 14px;
+    display:flex; justify-content:space-between; align-items:center;
+    z-index:10; pointer-events:none;
+}
+#score-display { font-size:18px; font-weight:700; color:#ffe066; text-shadow:0 0 12px #ffe066aa; }
+#lives-display { font-size:16px; }
+
+canvas {
+    display:block;
+    width:100%; height:100%;
+    border:2px solid #2a2a4a;
+    border-radius:8px;
+    box-shadow:0 0 30px #6264a720;
+    background:#0a0a1a;
+}
+
+#overlay {
+    position:absolute; inset:0;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:rgba(0,0,0,0.85);
+    z-index:20; text-align:center; padding:20px;
+    border-radius:8px;
+}
+#overlay h1 { font-size:2em; font-weight:900; color:#ffe066; text-shadow:0 0 20px #ffe066; margin-bottom:10px; }
+#overlay .inst { font-size:0.9em; color:#c0c0e0; margin-bottom:6px; line-height:1.6; max-width:320px; }
+#overlay .inst b { color:#ff4444; }
+#overlay .inst .y { color:#ffe066; }
+.kb-hint {
+    margin-top:8px;
+    font-size:0.78em;
+    color:rgba(150,160,220,0.7);
+    letter-spacing:.03em;
+}
+#overlay button {
+    margin-top:18px; padding:11px 32px;
+    font-size:1em; font-weight:700;
+    background:linear-gradient(135deg,#6264a7,#8b5cf6);
+    color:#fff; border:none; border-radius:30px;
+    cursor:pointer; transition:transform .1s,box-shadow .1s;
+    box-shadow:0 4px 18px #6264a760;
+}
+#overlay button:hover { transform:scale(1.06); box-shadow:0 6px 24px #6264a790; }
+#final-score { font-size:1.2em; color:#ffe066; margin-top:6px; }
+
+#mobile-controls {
+    position:absolute; bottom:10px; left:0; right:0;
+    display:none;
+    justify-content:center; gap:20px; z-index:15;
+    pointer-events:none;
+}
+#mobile-controls button {
+    width:72px; height:72px; border-radius:50%;
+    border:2px solid #6264a7;
+    background:rgba(98,100,167,0.3);
+    color:#fff; font-size:26px;
+    cursor:pointer; touch-action:manipulation;
+    pointer-events:auto;
+    user-select:none; -webkit-user-select:none;
+}
+#mobile-controls button:active { background:rgba(98,100,167,0.6); }
+
+@media (pointer:coarse) { #mobile-controls { display:flex; } }
+@media (hover:none) { #mobile-controls { display:flex; } }
+</style>
+</head>
+<body>
+
+<div id="game-wrap">
+    <div id="ui">
+        <div id="score-display">Score: 0</div>
+        <div id="lives-display">❤️❤️❤️</div>
+    </div>
+    <canvas id="c"></canvas>
+    <div id="mobile-controls">
+        <button id="btn-left">◀</button>
+        <button id="btn-right">▶</button>
+    </div>
+    <div id="overlay">
+        <h1>🎮 DODGER</h1>
+        <p class="inst">Dodge the <b>red blocks</b> and collect the <span class="y">yellow coins</span>!<br>Use ← → arrow keys or A/D to move.</p>
+        <p class="kb-hint">⌨ Arrow keys / A D &nbsp;|&nbsp; 📱 Tap buttons below</p>
+        <button id="start-btn">START GAME</button>
+    </div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const overlay = document.getElementById('overlay');
+const startBtn = document.getElementById('start-btn');
+const scoreDisplay = document.getElementById('score-display');
+const livesDisplay = document.getElementById('lives-display');
+
+const W = 400, H = 550;
+canvas.width = W; canvas.height = H;
+
+let player, obstacles, coins, score, lives, gameRunning, animId, speed, frame;
+const keys = {};
+
+function initGame() {
+    player = { x: W/2 - 18, y: H - 70, w: 36, h: 36, vx: 0 };
+    obstacles = []; coins = []; score = 0; lives = 3;
+    speed = 2.2; frame = 0; gameRunning = true;
+    updateHUD();
+}
+
+function updateHUD() {
+    scoreDisplay.textContent = 'Score: ' + score;
+    livesDisplay.textContent = '❤️'.repeat(Math.max(0,lives));
+}
+
+function spawnObstacle() {
+    const w = 28 + Math.random()*34;
+    obstacles.push({ x: Math.random()*(W-w), y:-40, w, h: 22+Math.random()*16, speed: speed*(0.8+Math.random()*0.6) });
+}
+function spawnCoin() {
+    coins.push({ x: Math.random()*(W-20)+10, y:-30, r:12, speed: speed*0.7 });
+}
+
+function rect(x,y,w,h,fill,stroke,glow) {
+    ctx.save();
+    if(glow){ctx.shadowBlur=18;ctx.shadowColor=glow;}
+    ctx.fillStyle=fill; ctx.strokeStyle=stroke||fill; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.roundRect(x,y,w,h,6); ctx.fill(); if(stroke)ctx.stroke();
+    ctx.restore();
+}
+function circle(x,y,r,fill,glow) {
+    ctx.save();
+    if(glow){ctx.shadowBlur=20;ctx.shadowColor=glow;}
+    ctx.fillStyle=fill; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+}
+function collides(a,bx,by,bw,bh){return a.x<bx+bw&&a.x+a.w>bx&&a.y<by+bh&&a.y+a.h>by;}
+function coinHit(p,c){const cx=c.x,cy=c.y,r=c.r;return cx>p.x&&cx<p.x+p.w&&cy>p.y&&cy<p.y+p.h;}
+
+let hitCooldown = 0;
+
+function loop() {
+    if(!gameRunning) return;
+    frame++;
+
+    if(keys['ArrowLeft']||keys['KeyA']||keys['btnLeft']) player.vx = Math.max(player.vx-1.2,-7);
+    else if(keys['ArrowRight']||keys['KeyD']||keys['btnRight']) player.vx = Math.min(player.vx+1.2,7);
+    else player.vx *= 0.75;
+    player.x = Math.max(0,Math.min(W-player.w, player.x+player.vx));
+
+    if(frame%Math.max(28,60-Math.floor(score/100))==0) spawnObstacle();
+    if(frame%90==0) spawnCoin();
+
+    for(let i=obstacles.length-1;i>=0;i--){
+        obstacles[i].y += obstacles[i].speed;
+        if(obstacles[i].y > H+50) { obstacles.splice(i,1); continue; }
+        if(hitCooldown===0 && collides(player,obstacles[i].x,obstacles[i].y,obstacles[i].w,obstacles[i].h)){
+            lives--; hitCooldown=90; obstacles.splice(i,1); updateHUD();
+            if(lives<=0){ endGame(); return; }
+        }
+    }
+    for(let i=coins.length-1;i>=0;i--){
+        coins[i].y += coins[i].speed;
+        if(coins[i].y > H+40){ coins.splice(i,1); continue; }
+        if(coinHit(player,coins[i])){ score+=10; speed=Math.min(8,speed+0.04); coins.splice(i,1); updateHUD(); }
+    }
+
+    if(frame%30===0){ score+=1; updateHUD(); }
+    if(hitCooldown>0) hitCooldown--;
+    if(frame%300===0) speed=Math.min(8,speed+0.15);
+
+    ctx.clearRect(0,0,W,H);
+
+    ctx.strokeStyle='rgba(98,100,167,0.08)'; ctx.lineWidth=1;
+    for(let x=0;x<W;x+=40){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
+    for(let y=0;y<H;y+=40){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+
+    for(const c of coins){
+        circle(c.x,c.y,c.r,'#ffe066','#ffe066');
+        ctx.save(); ctx.fillStyle='#ffa500'; ctx.font='bold 12px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('$',c.x,c.y); ctx.restore();
+    }
+
+    for(const o of obstacles){
+        rect(o.x,o.y,o.w,o.h,'#ff3333','#ff6666','#ff3333');
+        ctx.save(); ctx.fillStyle='rgba(255,255,255,0.7)'; ctx.font='bold 13px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('✕',o.x+o.w/2,o.y+o.h/2); ctx.restore();
+    }
+
+    const flash = hitCooldown>0 && Math.floor(hitCooldown/6)%2===0;
+    if(!flash){
+        rect(player.x,player.y,player.w,player.h,'#6264a7','#a0a0ff','#6264a7');
+        ctx.save(); ctx.fillStyle='#fff'; ctx.font='bold 18px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText('▲',player.x+player.w/2,player.y+player.h/2); ctx.restore();
+    }
+
+    animId = requestAnimationFrame(loop);
+}
+
+const _urlParams = new URLSearchParams(window.location.search);
+const _challengeId = _urlParams.get('challenge');
+const _challengePlayer = _urlParams.get('player');
+let _challengeScoreSubmitted = false;
+
+function endGame() {
+    gameRunning = false;
+    cancelAnimationFrame(animId);
+    let extraHtml = '';
+    if (_challengeId && !_challengeScoreSubmitted) {
+        extraHtml = '<div id="ch-submit-msg" style="margin-top:8px;font-size:13px;color:#ffe066;">Submitting challenge score…</div>';
+    }
+    overlay.innerHTML = `<h1>💥 GAME OVER</h1><p class="inst">You survived!</p><div id="final-score">Final Score: <b>${score}</b></div>${extraHtml}<button id="start-btn">PLAY AGAIN</button>`;
+    overlay.style.display = 'flex';
+    document.getElementById('start-btn').addEventListener('click', startGame);
+    try { window.parent.postMessage({ type:'game-score', game:'dodger', score }, '*'); } catch{}
+    if (_challengeId && _challengePlayer && !_challengeScoreSubmitted) {
+        _challengeScoreSubmitted = true;
+        try { window.parent.postMessage({ type:'challenge-score', challengeId: _challengeId, score }, '*'); } catch{}
+        fetch('/api/challenges/' + encodeURIComponent(_challengeId) + '/score', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ email: _challengePlayer, score })
+        }).then(r=>r.json()).then(d=>{
+            const el = document.getElementById('ch-submit-msg');
+            if(el) el.textContent = d.challenge?.status==='complete' ? '✅ Challenge complete! Check your chat.' : '✅ Score submitted! Waiting for opponent…';
+        }).catch(()=>{ const el=document.getElementById('ch-submit-msg'); if(el) el.textContent='⚠️ Could not submit score.'; });
+    }
+    try {
+        const u = JSON.parse(localStorage.getItem('talkUser')||'{}');
+        if(u.email) fetch('/api/leaderboard/score',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:u.email,name:u.name||u.email,game:'dodger',score})}).catch(()=>{});
+    } catch{}
+}
+
+function startGame() {
+    overlay.style.display = 'none';
+    initGame();
+    animId = requestAnimationFrame(loop);
+}
+
+startBtn.addEventListener('click', startGame);
+document.addEventListener('keydown', e=>{
+    keys[e.code]=true;
+    if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].includes(e.key)) e.preventDefault();
+});
+document.addEventListener('keyup', e=>{ keys[e.code]=false; });
+
+// Mobile + mouse buttons
+function bindDirBtn(id, keyName) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const on  = () => { keys[keyName]=true; };
+    const off = () => { keys[keyName]=false; };
+    el.addEventListener('touchstart', e=>{ e.preventDefault(); on(); }, {passive:false});
+    el.addEventListener('touchend',   e=>{ e.preventDefault(); off(); }, {passive:false});
+    el.addEventListener('touchcancel', off);
+    el.addEventListener('mousedown',  on);
+    el.addEventListener('mouseup',    off);
+    el.addEventListener('mouseleave', off);
+}
+bindDirBtn('btn-left',  'btnLeft');
+bindDirBtn('btn-right', 'btnRight');
+</script>
+</body>
+</html>
